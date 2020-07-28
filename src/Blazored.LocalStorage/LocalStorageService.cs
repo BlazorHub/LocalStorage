@@ -20,7 +20,7 @@ namespace Blazored.LocalStorage
             _jSInProcessRuntime = jSRuntime as IJSInProcessRuntime;
         }
 
-        public async Task SetItemAsync<T>(string key, T data)
+        public async ValueTask SetItemAsync<T>(string key, T data)
         {
             if (string.IsNullOrEmpty(key))
                 throw new ArgumentNullException(nameof(key));
@@ -43,7 +43,7 @@ namespace Blazored.LocalStorage
             RaiseOnChanged(key, e.OldValue, data);
         }
 
-        public async Task<T> GetItemAsync<T>(string key)
+        public async ValueTask<T> GetItemAsync<T>(string key)
         {
             if (string.IsNullOrEmpty(key))
                 throw new ArgumentNullException(nameof(key));
@@ -65,7 +65,15 @@ namespace Blazored.LocalStorage
             }
         }
 
-        public async Task RemoveItemAsync(string key)
+        public async ValueTask<string> GetItemAsStringAsync(string key)
+        {
+            if (string.IsNullOrEmpty(key))
+                throw new ArgumentNullException(nameof(key));
+
+            return await _jSRuntime.InvokeAsync<string>("localStorage.getItem", key);
+        }
+
+        public async ValueTask RemoveItemAsync(string key)
         {
             if (string.IsNullOrEmpty(key))
                 throw new ArgumentNullException(nameof(key));
@@ -73,13 +81,13 @@ namespace Blazored.LocalStorage
             await _jSRuntime.InvokeVoidAsync("localStorage.removeItem", key);
         }
 
-        public async Task ClearAsync() => await _jSRuntime.InvokeVoidAsync("localStorage.clear");
+        public async ValueTask ClearAsync() => await _jSRuntime.InvokeVoidAsync("localStorage.clear");
 
-        public async Task<int> LengthAsync() => await _jSRuntime.InvokeAsync<int>("eval", "localStorage.length");
+        public async ValueTask<int> LengthAsync() => await _jSRuntime.InvokeAsync<int>("eval", "localStorage.length");
 
-        public async Task<string> KeyAsync(int index) => await _jSRuntime.InvokeAsync<string>("localStorage.key", index);
+        public async ValueTask<string> KeyAsync(int index) => await _jSRuntime.InvokeAsync<string>("localStorage.key", index);
 
-        public async Task<bool> ContainKeyAsync(string key) => await _jSRuntime.InvokeAsync<bool>("localStorage.hasOwnProperty", key);
+        public async ValueTask<bool> ContainKeyAsync(string key) => await _jSRuntime.InvokeAsync<bool>("localStorage.hasOwnProperty", key);
 
         public void SetItem<T>(string key, T data)
         {
@@ -129,6 +137,17 @@ namespace Blazored.LocalStorage
             {
                 return (T)(object)serialisedData;
             }
+        }
+        
+        public string GetItemAsString(string key)
+        {
+            if (string.IsNullOrEmpty(key))
+                throw new ArgumentNullException(nameof(key));
+
+            if (_jSInProcessRuntime == null)
+                throw new InvalidOperationException("IJSInProcessRuntime not available");
+
+            return _jSInProcessRuntime.Invoke<string>("localStorage.getItem", key);
         }
 
         public void RemoveItem(string key)
@@ -189,6 +208,20 @@ namespace Blazored.LocalStorage
             return e;
         }
 
+        private ChangingEventArgs RaiseOnChangingSync(string key, object data)
+        {
+            var e = new ChangingEventArgs
+            {
+                Key = key,
+                OldValue = GetItemInternal(key),
+                NewValue = data
+            };
+
+            Changing?.Invoke(this, e);
+
+            return e;
+        }
+
         private async Task<T> GetItemInternalAsync<T>(string key)
         {
             if (string.IsNullOrEmpty(key))
@@ -210,21 +243,7 @@ namespace Blazored.LocalStorage
             }
         }
 
-        private ChangingEventArgs RaiseOnChangingSync(string key, object data)
-        {
-            var e = new ChangingEventArgs
-            {
-                Key = key,
-                OldValue = GetItemInternal<object>(key),
-                NewValue = data
-            };
-
-            Changing?.Invoke(this, e);
-
-            return e;
-        }
-
-        public T GetItemInternal<T>(string key)
+        private object GetItemInternal(string key)
         {
             if (string.IsNullOrEmpty(key))
                 throw new ArgumentNullException(nameof(key));
@@ -240,11 +259,19 @@ namespace Blazored.LocalStorage
             if (serialisedData.StartsWith("{") && serialisedData.EndsWith("}")
                 || serialisedData.StartsWith("\"") && serialisedData.EndsWith("\""))
             {
-                return JsonSerializer.Deserialize<T>(serialisedData, _jsonOptions);
+                try
+                {
+                    //Try to deserialize
+                    return JsonSerializer.Deserialize<object>(serialisedData, _jsonOptions);
+                }
+                catch (JsonException)
+                {
+                    return serialisedData;
+                }
             }
             else
             {
-                return (T)(object)serialisedData;
+                return serialisedData;
             }
         }
 
